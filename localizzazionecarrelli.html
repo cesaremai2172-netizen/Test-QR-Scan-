@@ -1,0 +1,551 @@
+
+                        <!DOCTYPE html>
+                        <html lang="en">
+                        <head>
+                            <meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+							<style>
+								body {
+									background-color: white; /* Ensure the iframe has a white background */
+								}
+
+								
+							</style>
+                        </head>
+                        <body>
+                            <!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Scansione QR</title>
+
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 15px;
+            background: #f2f4f7;
+            font-family: Arial, sans-serif;
+        }
+
+        .contenitore {
+            width: 100%;
+            max-width: 650px;
+            margin: auto;
+        }
+
+        .pannello {
+            background: white;
+            padding: 18px;
+            margin-bottom: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px #0002;
+        }
+
+        h1, h2 {
+            color: #003b5c;
+            text-align: center;
+        }
+
+        button {
+            width: 100%;
+            min-height: 46px;
+            margin-top: 10px;
+            padding: 10px;
+            border: 0;
+            border-radius: 6px;
+            background: #0078d4;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        button:disabled {
+            background: #999;
+        }
+
+        .verde {
+            background: #188038;
+        }
+
+        .rosso {
+            background: #b3261e;
+        }
+
+        #cartella {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            background: #e3f2e5;
+            word-break: break-word;
+        }
+
+        #lettore {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            margin-top: 15px;
+        }
+
+        #reader {
+            width: min(92vw, 460px);
+            min-height: 300px;
+            border: 3px solid #0078d4;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #111;
+        }
+
+        #reader video {
+            width: 100% !important;
+            height: auto !important;
+            display: block;
+        }
+
+        #stato {
+            margin-top: 15px;
+            padding: 12px;
+            text-align: center;
+            border-radius: 6px;
+            background: #edf1f5;
+            font-weight: bold;
+            word-break: break-word;
+        }
+
+        .nascosto {
+            display: none;
+        }
+
+        .nota {
+            color: #555;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="contenitore">
+
+    <div class="pannello">
+        <h1>Scansione QR</h1>
+
+        <p class="nota">
+            Seleziona la cartella locale sincronizzata con OneDrive.
+            I file modificati verranno successivamente sincronizzati su SharePoint.
+        </p>
+
+        <button id="btnCartella" onclick="selezionaCartella()">
+            Seleziona cartella SharePoint/OneDrive
+        </button>
+
+        <div id="cartella" class="nascosto"></div>
+    </div>
+
+    <div id="pannelloScanner" class="pannello nascosto">
+        <h2 id="titolo">Scansiona MATRICOLA</h2>
+
+        <div id="lettore">
+            <div id="reader"></div>
+        </div>
+
+        <div id="stato">
+            In attesa della scansione
+        </div>
+
+        <button class="rosso" onclick="fermaScanner()">
+            Arresta fotocamera
+        </button>
+    </div>
+
+</div>
+
+<script>
+
+    let cartellaHandle = null;
+    let scanner = null;
+    let scansioneInCorso = false;
+
+    let fase = 1;
+    let matricola = "";
+
+    /*
+     * Selezione della cartella locale
+     */
+    async function selezionaCartella() {
+
+        if (!window.showDirectoryPicker) {
+            alert(
+                "Il browser non supporta la selezione diretta delle cartelle." +
+                "\nUtilizza Google Chrome o Microsoft Edge aggiornato."
+            );
+            return;
+        }
+
+        try {
+            cartellaHandle = await window.showDirectoryPicker({
+                mode: "readwrite"
+            });
+
+            document.getElementById("cartella").innerText =
+                "Cartella selezionata: " + cartellaHandle.name;
+
+            document.getElementById("cartella")
+                .classList.remove("nascosto");
+
+            document.getElementById("pannelloScanner")
+                .classList.remove("nascosto");
+
+            fase = 1;
+            await avviaScanner();
+
+        } catch (errore) {
+            if (errore.name !== "AbortError") {
+                mostraErrore("Impossibile selezionare la cartella: " + errore.message);
+            }
+        }
+    }
+
+
+    /*
+     * Avvio della fotocamera e del lettore QR
+     */
+    async function avviaScanner() {
+
+        await fermaScanner();
+
+        scansioneInCorso = false;
+
+        document.getElementById("titolo").innerText =
+            fase === 1
+                ? "Scansiona MATRICOLA"
+                : "Scansiona POSIZIONE";
+
+        document.getElementById("stato").innerText =
+            fase === 1
+                ? "Inquadra il QR della matricola"
+                : "Inquadra il QR della posizione";
+
+        scanner = new Html5Qrcode("reader");
+
+        try {
+
+            await scanner.start(
+                {
+                    facingMode: "environment"
+                },
+                {
+                    fps: 10,
+                    qrbox: {
+                        width: 250,
+                        height: 250
+                    },
+                    aspectRatio: 1
+                },
+                async function (testoLetto) {
+
+                    if (scansioneInCorso) {
+                        return;
+                    }
+
+                    scansioneInCorso = true;
+
+                    const codice = testoLetto.trim();
+
+                    if (!codice || codice.length > 150) {
+                        beep(false);
+                        scansioneInCorso = false;
+                        return;
+                    }
+
+                    beep(true);
+
+                    await fermaScanner();
+
+                    if (fase === 1) {
+                        await gestisciMatricola(codice);
+                    } else {
+                        await gestisciPosizione(codice);
+                    }
+                },
+                function () {
+                    // Errori temporanei di scansione ignorati
+                }
+            );
+
+        } catch (errore) {
+            mostraErrore(
+                "Impossibile accedere alla webcam. " +
+                "Controlla i permessi della fotocamera."
+            );
+        }
+    }
+
+
+    /*
+     * Arresto della fotocamera
+     */
+    async function fermaScanner() {
+
+        if (scanner) {
+            try {
+                await scanner.stop();
+            } catch (e) {
+                // Scanner già fermo
+            }
+
+            try {
+                await scanner.clear();
+            } catch (e) {
+                // Lettore già pulito
+            }
+
+            scanner = null;
+        }
+    }
+
+
+    /*
+     * Prima scansione: ricerca del file MATRICOLA.xlsx
+     */
+    async function gestisciMatricola(codice) {
+
+        try {
+
+            const nomeFile = codice + ".xlsx";
+
+            document.getElementById("stato").innerText =
+                "Ricerca del file " + nomeFile + "...";
+
+            const esiste = await cartellaHandle.getFileHandle(nomeFile);
+
+            matricola = codice;
+            fase = 2;
+
+            document.getElementById("stato").innerText =
+                "Matricola acquisita: " + matricola +
+                ". Ora scansiona la posizione.";
+
+            setTimeout(() => {
+                avviaScanner();
+            }, 500);
+
+        } catch (errore) {
+
+            document.getElementById("stato").innerText =
+                "File non trovato: " + codice + ".xlsx";
+
+            alert(
+                "Nella cartella selezionata non è stato trovato il file:\n\n" +
+                codice + ".xlsx"
+            );
+
+            scansioneInCorso = false;
+            avviaScanner();
+        }
+    }
+
+
+    /*
+     * Seconda scansione: aggiornamento del file Excel
+     */
+    async function gestisciPosizione(posizione) {
+
+        try {
+
+            const nomeFile = matricola + ".xlsx";
+
+            document.getElementById("stato").innerText =
+                "Aggiornamento del file Excel...";
+
+            const fileHandle =
+                await cartellaHandle.getFileHandle(nomeFile);
+
+            const file = await fileHandle.getFile();
+            const contenuto = await file.arrayBuffer();
+
+            const workbook = new ExcelJS.Workbook();
+
+            await workbook.xlsx.load(contenuto);
+
+            const worksheet = workbook.worksheets[0];
+
+            if (!worksheet) {
+                throw new Error("Il file Excel non contiene fogli.");
+            }
+
+            /*
+             * Individua le colonne tramite le intestazioni
+             */
+            let colMatricola = 0;
+            let colPosizione = 0;
+            let colData = 0;
+
+            worksheet.getRow(1).eachCell((cell, colonna) => {
+
+                const intestazione = String(cell.value || "")
+                    .trim()
+                    .toUpperCase();
+
+                if (intestazione === "MATRICOLA") {
+                    colMatricola = colonna;
+                }
+
+                if (intestazione === "POSIZIONE") {
+                    colPosizione = colonna;
+                }
+
+                if (intestazione === "DATA") {
+                    colData = colonna;
+                }
+            });
+
+            if (!colMatricola || !colPosizione || !colData) {
+                throw new Error(
+                    "Il file deve contenere le colonne " +
+                    "MATRICOLA, POSIZIONE e DATA nella prima riga."
+                );
+            }
+
+            /*
+             * Aggiunge la nuova riga
+             */
+            const nuovaRiga = [];
+
+            const numeroColonne =
+                Math.max(colMatricola, colPosizione, colData);
+
+            for (let i = 1; i <= numeroColonne; i++) {
+                nuovaRiga[i - 1] = null;
+            }
+
+            nuovaRiga[colMatricola - 1] = matricola;
+            nuovaRiga[colPosizione - 1] = posizione;
+            nuovaRiga[colData - 1] = new Date();
+
+            worksheet.addRow(nuovaRiga);
+
+            /*
+             * Scrive il file nella cartella selezionata
+             */
+            const nuovoFile = await workbook.xlsx.writeBuffer();
+
+            const scrittura =
+                await fileHandle.createWritable();
+
+            await scrittura.write(nuovoFile);
+            await scrittura.close();
+
+            document.getElementById("stato").innerText =
+                "Riga inserita correttamente.";
+
+            const nuovaScansione = confirm(
+                "File aggiornato correttamente.\n\n" +
+                "Vuoi effettuare una nuova scansione?"
+            );
+
+            if (nuovaScansione) {
+
+                fase = 1;
+                matricola = "";
+                scansioneInCorso = false;
+
+                await avviaScanner();
+
+            } else {
+
+                await fermaScanner();
+
+                document.getElementById("stato").innerText =
+                    "Operazione terminata.";
+            }
+
+        } catch (errore) {
+
+            mostraErrore(
+                "Errore durante l'aggiornamento del file Excel:\n" +
+                errore.message
+            );
+
+            fase = 1;
+            matricola = "";
+            scansioneInCorso = false;
+
+            avviaScanner();
+        }
+    }
+
+
+    /*
+     * Emissione del beep
+     */
+    function beep(esito) {
+
+        try {
+
+            const AudioContext =
+                window.AudioContext ||
+                window.webkitAudioContext;
+
+            const audioContext = new AudioContext();
+
+            const oscillatore =
+                audioContext.createOscillator();
+
+            const volume =
+                audioContext.createGain();
+
+            oscillatore.type = "sine";
+            oscillatore.frequency.value =
+                esito ? 1000 : 300;
+
+            volume.gain.setValueAtTime(
+                0.25,
+                audioContext.currentTime
+            );
+
+            volume.gain.exponentialRampToValueAtTime(
+                0.001,
+                audioContext.currentTime + 0.2
+            );
+
+            oscillatore.connect(volume);
+            volume.connect(audioContext.destination);
+
+            oscillatore.start();
+            oscillatore.stop(
+                audioContext.currentTime + 0.2
+            );
+
+        } catch (errore) {
+            console.log("Audio non disponibile.");
+        }
+    }
+
+
+    function mostraErrore(testo) {
+        document.getElementById("stato").innerText = testo;
+        alert(testo);
+    }
+
+</script>
+
+</body>
+</html>
+
+							<script>
+                            	
+							</script>
+                        </body>
+                        </html>
+                    
